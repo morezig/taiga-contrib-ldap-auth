@@ -21,8 +21,26 @@ from taiga.base.utils.slug import slugify_uniquely
 from taiga.auth.services import make_auth_response_data
 from taiga.auth.signals import user_registered as user_registered_signal
 
+from django.contrib.auth import get_user_model
+from taiga.base import exceptions as exc
+from django.db.models import Q
+
 from . import connector
 
+def get_user_by_username_or_email(username_or_email):
+    user_model = get_user_model()
+    qs = user_model.objects.filter(Q(username__iexact=username_or_email) |
+                                   Q(email__iexact=username_or_email))
+
+    if len(qs) > 1:
+        qs = qs.filter(Q(username=username_or_email) |
+                       Q(email=username_or_email))
+
+    if len(qs) == 0:
+        return None
+
+    user = qs[0]
+    return user
 
 @tx.atomic
 def ldap_register(username: str, email: str, full_name: str):
@@ -38,7 +56,7 @@ def ldap_register(username: str, email: str, full_name: str):
 
     try:
         # LDAP user association exist?
-        user = user_model.objects.get(username=username)
+        user = user_model.objects.get(username=username.replace('.', ''))
     except user_model.DoesNotExist:
         # Create a new user
         username_unique = slugify_uniquely(username, user_model, slugfield="username")
@@ -49,12 +67,18 @@ def ldap_register(username: str, email: str, full_name: str):
 
     return user
 
-
 def ldap_login_func(request):
     username = request.DATA.get('username', None)
     password = request.DATA.get('password', None)
 
-    email, full_name = connector.login(username=username, password=password)
-    user = ldap_register(username=username, email=email, full_name=full_name)
+    user = get_user_by_username_or_email(username)
+    if user:
+        if not user.check_password(password):
+            raise exc.WrongArguments(_("Username or password does not matches user."))
+    else:
+        email, full_name = connector.login(username=username, password=password)
+        user = ldap_register(username=username, email=email, full_name=full_name)
+        
     data = make_auth_response_data(user)
     return data
+
