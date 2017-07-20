@@ -72,9 +72,10 @@ def ldap_login_func(request):
     password = request.DATA.get('password', None)
 
     user = get_user_by_username_or_email(username)
-    if user:
-        if not user.check_password(password):
-            raise exc.WrongArguments(_("Username or password does not matches user."))
+    if user and user.check_password(password):
+        print('Login!!')
+    elif user and not user.check_password(password):
+         raise exc.WrongArguments(_("Username or password does not matches user."))
     else:
         email, full_name = connector.login(username=username, password=password)
         user = ldap_register(username=username, email=email, full_name=full_name)
